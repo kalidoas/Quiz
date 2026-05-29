@@ -1,8 +1,28 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+const windowMs = 60 * 60 * 1000; // 1 heure
+const maxRequests = 10;
+const rateLimitMap = new Map<string, { count: number, resetTime: number }>();
+
 export async function POST(req: Request) {
   try {
+    const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+
+    const now = Date.now();
+    let clientData = rateLimitMap.get(ip);
+
+    if (!clientData || now > clientData.resetTime) {
+      clientData = { count: 0, resetTime: now + windowMs };
+    }
+
+    clientData.count++;
+    rateLimitMap.set(ip, clientData);
+
+    if (clientData.count > maxRequests) {
+      return NextResponse.json({ error: "Limite atteinte. Veuillez patienter pour générer de nouveaux quiz." }, { status: 429 });
+    }
+
     const { text, difficulty, questionCount, questionType } = await req.json();
 
     if (!text || text.trim().length === 0) {
