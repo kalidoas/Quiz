@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import * as pdfjsLib from "pdfjs-dist";
 
 // Types
 interface QuizQuestion {
@@ -91,7 +90,10 @@ export default function Home() {
       setError(null);
 
       try {
-        // Configuration du Worker exécutée uniquement côté client
+        // Importation dynamique exécutée uniquement côté client (Bypass SSR)
+        const pdfjsLib = await import("pdfjs-dist");
+
+        // Configuration du Worker
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
           pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
         }
