@@ -20,7 +20,10 @@ export async function POST(req: Request) {
     rateLimitMap.set(ip, clientData);
 
     if (clientData.count > maxRequests) {
-      return NextResponse.json({ error: "Limite atteinte. Veuillez patienter pour générer de nouveaux quiz." }, { status: 429 });
+      return NextResponse.json({
+        error: "Limite atteinte. Veuillez patienter pour générer de nouveaux quiz.",
+        resetTime: clientData.resetTime
+      }, { status: 429 });
     }
 
     const { text, difficulty, questionCount, questionType } = await req.json();

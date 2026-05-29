@@ -30,11 +30,16 @@ export default function Home() {
   const [questionQueue, setQuestionQueue] = useState<QuizQuestion[]>([]);
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<number | null>(null);
 
   // Scoring / Logic State
   const [failedQuestions, setFailedQuestions] = useState<QuizQuestion[]>([]);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [score, setScore] = useState(0);
+
+  // Rate Limiting States
+  const [rateLimitResetTime, setRateLimitResetTime] = useState<number | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
 
   // Dark Mode Theme toggle
   const [darkMode, setDarkMode] = useState(true);
@@ -52,6 +57,8 @@ export default function Home() {
           setFailedQuestions(parsed.failedQuestions || []);
           setScore(parsed.score || 0);
           setDifficulty(parsed.difficulty || "Moyen");
+          setRateLimitResetTime(parsed.rateLimitResetTime || null);
+          setErrorCode(parsed.errorCode || null);
         }
       } catch (e) {
         console.error("Erreur de parsing localStorage", e);
@@ -68,10 +75,12 @@ export default function Home() {
         totalQuestions,
         failedQuestions,
         score,
-        difficulty
+        difficulty,
+        rateLimitResetTime,
+        errorCode
       }));
     }
-  }, [phase, questionQueue, totalQuestions, failedQuestions, score, difficulty]);
+  }, [phase, questionQueue, totalQuestions, failedQuestions, score, difficulty, rateLimitResetTime, errorCode]);
 
   useEffect(() => {
     if (darkMode) {
@@ -88,6 +97,7 @@ export default function Home() {
       setPhase("config");
       setIsAnalyzing(true);
       setError(null);
+      setErrorCode(null);
 
       try {
         // Importation dynamique exécutée uniquement côté client (Bypass SSR)
@@ -150,6 +160,7 @@ export default function Home() {
     if (pdfParts.length === 0) return;
     setPhase("generating");
     setError(null);
+    setErrorCode(null);
 
     try {
       const textToSend = pdfParts[selectedPartIndex].text;
@@ -172,14 +183,26 @@ export default function Home() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erreur de génération");
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw { isRateLimit: true, resetTime: data.resetTime, message: data.error };
+        }
+        throw new Error(data.error || "Erreur de génération");
+      }
 
       setQuestionQueue(data.questions);
       setTotalQuestions(data.questions.length);
       setPhase("quiz");
     } catch (err: any) {
-      setError(err.message);
-      setPhase("config");
+      if (err.isRateLimit) {
+        setRateLimitResetTime(err.resetTime);
+        setErrorCode(429);
+        setPhase("config");
+      } else {
+        setError(err.message || err);
+        setErrorCode(null);
+        setPhase("config");
+      }
     }
   };
 
@@ -250,7 +273,36 @@ export default function Home() {
     setSelectedOptions([]);
     setScore(0);
     setError(null);
+    setErrorCode(null);
+    setRateLimitResetTime(null);
   };
+
+  // Timer Countdown for Rate Limit
+  const [timeLeft, setTimeLeft] = useState<string>("");
+  useEffect(() => {
+    if (errorCode !== 429 || !rateLimitResetTime) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const diff = rateLimitResetTime - now;
+
+      if (diff <= 0) {
+        setErrorCode(null);
+        setRateLimitResetTime(null);
+        clearInterval(interval);
+      } else {
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        setTimeLeft(
+          `${minutes.toString().padStart(2, "0")}:${seconds
+            .toString()
+            .padStart(2, "0")}`
+        );
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [errorCode, rateLimitResetTime]);
 
   return (
     <div className="flex flex-col h-full space-y-8 animate-in fade-in duration-500 pb-12">
@@ -314,7 +366,7 @@ export default function Home() {
         )}
 
         {/* PHASE: CONFIG - OPTIONS */}
-        {phase === "config" && !isAnalyzing && (
+        {phase === "config" && !isAnalyzing && errorCode !== 429 && (
           <div className="p-8 max-w-2xl mx-auto space-y-8">
             <h2 className="text-3xl font-bold text-center">Configuration du Quiz</h2>
             {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg text-center">{error}</div>}
@@ -399,6 +451,71 @@ export default function Home() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* PHASE: RATE LIMIT OVERLAY */}
+        {phase === "config" && errorCode === 429 && (
+          <div className="p-16 text-center space-y-8 flex flex-col items-center max-w-2xl mx-auto">
+            <div className="w-24 h-24 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mb-4">
+              <svg className="w-12 h-12 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+            </div>
+
+            <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white">
+              Une petite pause s'impose !
+            </h2>
+
+            <p className="text-gray-600 dark:text-gray-300 text-lg">
+              Pour garantir la qualité et la disponibilité du service pour tous, nous limitons la génération automatique.
+              Vous avez atteint votre limite pour le moment.
+            </p>
+
+            <div className="py-6 px-10 bg-indigo-50 dark:bg-gray-900/50 border border-indigo-100 dark:border-indigo-800/50 rounded-2xl shadow-inner">
+              <p className="text-sm font-semibold text-indigo-800 dark:text-indigo-400 mb-2 uppercase tracking-wide">
+                Génération disponible dans :
+              </p>
+              <div className="text-5xl font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                {timeLeft || "Calcul..."}
+              </div>
+            </div>
+
+            {/* FEEDBACK SECTION */}
+            <div className="w-full mt-12 pt-8 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-bold mb-6 text-gray-800 dark:text-gray-200">
+                Pendant ce temps, votre avis nous intéresse :
+              </h3>
+
+              <div className="flex justify-center space-x-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    onClick={() => setRating(star)}
+                    className={`p-2 transition-transform transform hover:scale-125 focus:outline-none ${
+                        rating && rating >= star ? "text-yellow-400" : "text-gray-300 dark:text-gray-600 hover:text-yellow-200"
+                    }`}
+                  >
+                    <svg className="w-10 h-10 fill-current" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+                    </svg>
+                  </button>
+                ))}
+              </div>
+
+              {rating && (
+                <p className="mt-6 text-green-600 dark:text-green-400 font-medium animate-in fade-in slide-in-from-bottom-2">
+                  Merci pour vos {rating} étoiles ! Cela nous aide beaucoup.
+                </p>
+              )}
+            </div>
+
+            <button
+                onClick={resetApp}
+                className="mt-4 px-6 py-3 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition"
+              >
+                Retourner a l'accueil
+            </button>
           </div>
         )}
 
