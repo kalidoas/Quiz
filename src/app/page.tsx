@@ -39,6 +39,40 @@ export default function Home() {
   // Dark Mode Theme toggle
   const [darkMode, setDarkMode] = useState(true);
 
+  // --- NOUVEAU : Restauration depuis localStorage ---
+  useEffect(() => {
+    const saved = localStorage.getItem("quiz_app_state");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (["quiz", "result", "review"].includes(parsed.phase)) {
+          setPhase(parsed.phase);
+          setQuestionQueue(parsed.questionQueue || []);
+          setTotalQuestions(parsed.totalQuestions || 0);
+          setFailedQuestions(parsed.failedQuestions || []);
+          setScore(parsed.score || 0);
+          setDifficulty(parsed.difficulty || "Moyen");
+        }
+      } catch (e) {
+        console.error("Erreur de parsing localStorage", e);
+      }
+    }
+  }, []);
+
+  // --- NOUVEAU : Sauvegarde automatique dans localStorage ---
+  useEffect(() => {
+    if (["quiz", "result", "review"].includes(phase)) {
+      localStorage.setItem("quiz_app_state", JSON.stringify({
+        phase,
+        questionQueue,
+        totalQuestions,
+        failedQuestions,
+        score,
+        difficulty
+      }));
+    }
+  }, [phase, questionQueue, totalQuestions, failedQuestions, score, difficulty]);
+
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add("dark");
@@ -100,7 +134,8 @@ export default function Home() {
         setPdfParts(newPdfParts);
         setSelectedPartIndex(0);
       } catch (err: any) {
-        setError("Erreur lors de l'analyse du PDF : " + (err.message || err));
+        console.error("Erreur PDF:", err);
+        setError("Erreur matérielle ou de lecture du PDF : " + (err.message || err));
         setPhase("upload");
       } finally {
         setIsAnalyzing(false);
@@ -199,7 +234,8 @@ export default function Home() {
     }
   };
 
-  const restart = () => {
+  const resetApp = () => {
+    localStorage.removeItem("quiz_app_state");
     setPhase("upload");
     setFile(null);
     setPdfParts([]);
@@ -210,6 +246,7 @@ export default function Home() {
     setFailedQuestions([]);
     setSelectedOptions([]);
     setScore(0);
+    setError(null);
   };
 
   return (
@@ -218,12 +255,22 @@ export default function Home() {
         <h1 className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
           QuizAI Generator
         </h1>
-        <button
-          onClick={() => setDarkMode(!darkMode)}
-          className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-        >
-          {darkMode ? "☀️ Clair" : "🌙 Sombre"}
-        </button>
+        <div className="flex items-center space-x-3">
+          {phase !== "upload" && (
+            <button
+              onClick={resetApp}
+              className="px-3 py-2 text-sm font-bold text-red-600 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition"
+            >
+              Quitter
+            </button>
+          )}
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+          >
+            {darkMode ? "☀️ Clair" : "🌙 Sombre"}
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
@@ -235,6 +282,11 @@ export default function Home() {
             <p className="text-gray-500 dark:text-gray-400 max-w-lg">
               Chargez vos cours au format PDF pour générer des quiz d'entraînement sur-mesure grâce à l'intelligence artificielle.
             </p>
+            {error && (
+              <div className="w-full max-w-md p-4 bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 font-semibold border border-red-300 dark:border-red-800 rounded-lg">
+                Erreur : {error}
+              </div>
+            )}
             <div className="w-full max-w-md mt-6 relative border-2 border-dashed border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-gray-900 rounded-xl p-8 hover:bg-indigo-100 dark:hover:bg-gray-800 transition">
               <input
                 type="file"
@@ -438,7 +490,7 @@ export default function Home() {
                 </button>
               )}
               <button
-                onClick={restart}
+                onClick={resetApp}
                 className="px-8 py-4 bg-gray-800 dark:bg-gray-100 text-white dark:text-gray-900 font-bold rounded-xl shadow transition transform"
               >
                 📝 Nouveau Quiz
@@ -478,7 +530,7 @@ export default function Home() {
 
             <div className="pt-8 text-center border-t border-gray-200 dark:border-gray-700 mt-8">
               <button
-                onClick={restart}
+                onClick={resetApp}
                 className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow transition"
               >
                 Retour à l'accueil
