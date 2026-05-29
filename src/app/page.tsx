@@ -95,7 +95,7 @@ export default function Home() {
         
         // Configuration du Worker exécutée uniquement côté client
         if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
         }
 
         const arrayBuffer = await f.arrayBuffer();
@@ -113,6 +113,9 @@ export default function Home() {
           const pageText = textContent.items.map((item) => item.str || "").join(" ");
 
           currentChunkText += pageText + "\n";
+
+          // Libérer la mémoire pour éviter de saturer la RAM sur mobile (Safari)
+          page.cleanup();
 
           // Découpage strict toutes les 20 pages ou à la fin du document
           if (i % PAGES_PER_CHUNK === 0 || i === pdf.numPages) {
