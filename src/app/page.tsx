@@ -1,12 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import * as pdfjsLib from "pdfjs-dist";
-
-// Configuration du Worker pour pdfjs-dist compatible Next.js App Router
-if (typeof window !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-}
 
 // Types
 interface QuizQuestion {
@@ -62,6 +56,14 @@ export default function Home() {
       setError(null);
 
       try {
+        // Importation dynamique SSR-Safe 
+        const pdfjsLib = await import("pdfjs-dist");
+        
+        // Configuration du Worker exécutée uniquement côté client
+        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+        }
+
         const arrayBuffer = await f.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
 
