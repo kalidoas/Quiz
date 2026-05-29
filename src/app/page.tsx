@@ -91,68 +91,79 @@ export default function Home() {
   }, [darkMode]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    setIsAnalyzing(true);
+    setError(null);
+
     const f = e.target.files?.[0];
-    if (f) {
-      setFile(f);
-      setPhase("config");
-      setIsAnalyzing(true);
-      setError(null);
-      setErrorCode(null);
+    if (!f) {
+      setIsAnalyzing(false);
+      return;
+    }
 
-      try {
-        // Importation dynamique exécutée uniquement côté client (Bypass SSR)
-        const pdfjsLib = await import("pdfjs-dist");
+    if (f.size > 5 * 1024 * 1024) {
+      setError("Le fichier est trop volumineux pour etre analyse sur cet appareil (Max 5MB).");
+      setIsAnalyzing(false);
+      return;
+    }
 
-        // Configuration du Worker
-        if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-        }
+    setFile(f);
+    setPhase("config");
+    setErrorCode(null);
 
-        const arrayBuffer = await f.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-        
-        const PAGES_PER_CHUNK = 20;
-        let currentChunkText = "";
-        let startPage = 1;
-        const newPdfParts: { label: string; text: string }[] = [];
+    try {
+      // Importation dynamique exécutée uniquement côté client (Bypass SSR)
+      const pdfjsLib = await import("pdfjs-dist");
 
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          // @ts-ignore
-          const pageText = textContent.items.map((item) => item.str || "").join(" ");
-
-          currentChunkText += pageText + "\n";
-
-          // Libérer la mémoire pour éviter de saturer la RAM sur mobile (Safari)
-          page.cleanup();
-
-          // Découpage strict toutes les 20 pages ou à la fin du document
-          if (i % PAGES_PER_CHUNK === 0 || i === pdf.numPages) {
-            const partNumber = newPdfParts.length + 1;
-            const label = startPage === i
-              ? `Partie ${partNumber} (Page ${startPage})`
-              : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
-
-            newPdfParts.push({
-              label,
-              text: currentChunkText
-            });
-
-            currentChunkText = "";
-            startPage = i + 1;
-          }
-        }
-
-        setPdfParts(newPdfParts);
-        setSelectedPartIndex(0);
-      } catch (err: any) {
-        console.error("Erreur PDF:", err);
-        setError("Erreur matérielle ou de lecture du PDF : " + (err.message || err));
-        setPhase("upload");
-      } finally {
-        setIsAnalyzing(false);
+      // Configuration du Worker
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
       }
+
+      const arrayBuffer = await f.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+
+      const PAGES_PER_CHUNK = 20;
+      let currentChunkText = "";
+      let startPage = 1;
+      const newPdfParts: { label: string; text: string }[] = [];
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        // @ts-ignore
+        const pageText = textContent.items.map((item) => item.str || "").join(" ");
+
+        currentChunkText += pageText + "\n";
+
+        // Libérer la mémoire pour éviter de saturer la RAM sur mobile (Safari)
+        page.cleanup();
+
+        // Découpage strict toutes les 20 pages ou à la fin du document
+        if (i % PAGES_PER_CHUNK === 0 || i === pdf.numPages) {
+          const partNumber = newPdfParts.length + 1;
+          const label = startPage === i
+            ? `Partie ${partNumber} (Page ${startPage})`
+            : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
+
+          newPdfParts.push({
+            label,
+            text: currentChunkText
+          });
+
+          currentChunkText = "";
+          startPage = i + 1;
+        }
+      }
+
+      setPdfParts(newPdfParts);
+      setSelectedPartIndex(0);
+    } catch (err: any) {
+      console.error("Erreur PDF:", err);
+      setError(err?.message || "Erreur inconnue");
+      setPhase("upload");
+      setIsAnalyzing(false);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
