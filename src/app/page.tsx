@@ -22,6 +22,11 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("upload");
   const [file, setFile] = useState<File | null>(null);
 
+  // PDF Chunking States
+  const [pdfParts, setPdfParts] = useState<{ label: string; text: string }[]>([]);
+  const [selectedPartIndex, setSelectedPartIndex] = useState<number>(0);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+
   // Config State
   const [difficulty, setDifficulty] = useState("Moyen");
   const [questionCount, setQuestionCount] = useState<number>(10);
@@ -48,45 +53,84 @@ export default function Home() {
     }
   }, [darkMode]);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
       setFile(f);
       setPhase("config");
+      setIsAnalyzing(true);
+      setError(null);
+
+      try {
+        const arrayBuffer = await f.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+
+        const MAX_CHARS_PER_CHUNK = 40000;
+        let currentChunkText = "";
+        let startPage = 1;
+        const newPdfParts: { label: string; text: string }[] = [];
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          // @ts-ignore
+          const pageText = textContent.items.map((item) => item.str || "").join(" ");
+
+          currentChunkText += pageText + "\n";
+
+          if (currentChunkText.length >= MAX_CHARS_PER_CHUNK || i === pdf.numPages) {
+            if (i === pdf.numPages && newPdfParts.length === 0) {
+              newPdfParts.push({
+                label: "Document complet",
+                text: currentChunkText
+              });
+            } else {
+              const partNumber = newPdfParts.length + 1;
+              const label = startPage === i
+                ? `Partie ${partNumber} (Page ${startPage})`
+                : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
+
+              newPdfParts.push({
+                label,
+                text: currentChunkText
+              });
+            }
+
+            currentChunkText = "";
+            startPage = i + 1;
+          }
+        }
+
+        setPdfParts(newPdfParts);
+        setSelectedPartIndex(0);
+      } catch (err: any) {
+        setError("Erreur lors de l'analyse du PDF : " + err.message);
+        setPhase("upload");
+      } finally {
+        setIsAnalyzing(false);
+      }
     }
   };
 
-    const generateQuiz = async () => {
-    if (!file) return;
+  const generateQuiz = async () => {
+    if (pdfParts.length === 0) return;
     setPhase("generating");
     setError(null);
 
     try {
-      // 1. Extraction locale du texte PDF (Contourne la limite de 4.5MB Vercel)
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-      
-      let text = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        // @ts-ignore
-        const pageText = textContent.items.map((item) => item.str || "").join(" ");
-        text += pageText + "\n";
+      const textToSend = pdfParts[selectedPartIndex].text;
+
+      if (!textToSend || textToSend.trim() === "") {
+        throw new Error("Impossible d'extraire le texte de cette partie.");
       }
 
-      if (!text || text.trim() === "") {
-        throw new Error("Impossible d'extraire le texte de ce PDF.");
-      }
-
-      // 2. Envoi JSON propre vers l'API
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          text,
+          text: textToSend,
           difficulty,
           questionCount,
           questionType
@@ -103,7 +147,7 @@ export default function Home() {
       setError(err.message);
       setPhase("config");
     }
-    };
+  };
 
   const handleOptionToggle = (option: string) => {
     if (questionType === "radio") {
@@ -162,6 +206,9 @@ export default function Home() {
   const restart = () => {
     setPhase("upload");
     setFile(null);
+    setPdfParts([]);
+    setSelectedPartIndex(0);
+    setIsAnalyzing(false);
     setQuestionQueue([]);
     setTotalQuestions(0);
     setFailedQuestions([]);
@@ -206,13 +253,42 @@ export default function Home() {
           </div>
         )}
 
-        {/* PHASE: CONFIG */}
-        {phase === "config" && (
+        {/* PHASE: CONFIG - ANALYZING */}
+        {phase === "config" && isAnalyzing && (
+          <div className="p-16 text-center space-y-6 flex flex-col items-center">
+            <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <h2 className="text-2xl font-bold animate-pulse">Analyse du PDF en cours...</h2>
+            <p className="text-gray-500">Découpage intelligent en sections logiques pour optimiser l'intelligence artificielle.</p>
+          </div>
+        )}
+
+        {/* PHASE: CONFIG - OPTIONS */}
+        {phase === "config" && !isAnalyzing && (
           <div className="p-8 max-w-2xl mx-auto space-y-8">
             <h2 className="text-3xl font-bold text-center">Configuration du Quiz</h2>
             {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg text-center">{error}</div>}
 
             <div className="space-y-6">
+              
+              {pdfParts.length > 0 && (
+                <div className="mb-6 p-6 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                  <h3 className="block text-sm font-semibold mb-3 text-indigo-900 dark:text-indigo-200">
+                    Document analysé ({pdfParts.length} partie{pdfParts.length > 1 ? "s" : ""}). Choisissez la section à réviser :
+                  </h3>
+                  <select
+                    value={selectedPartIndex}
+                    onChange={(e) => setSelectedPartIndex(Number(e.target.value))}
+                    className="w-full p-3 rounded-lg border border-indigo-300 dark:border-indigo-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 font-medium"
+                  >
+                    {pdfParts.map((part, index) => (
+                      <option key={index} value={index}>
+                        {part.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-semibold mb-2">Niveau de difficulté</label>
                 <select
@@ -280,7 +356,7 @@ export default function Home() {
           <div className="p-16 text-center space-y-6 flex flex-col items-center">
             <div className="w-16 h-16 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
             <h2 className="text-2xl font-bold animate-pulse">L'Intelligence Artificielle crée votre quiz...</h2>
-            <p className="text-gray-500">Veuillez patienter pendant l'analyse de votre document.</p>
+            <p className="text-gray-500">Génération automatique des correctifs en cours.</p>
           </div>
         )}
 
