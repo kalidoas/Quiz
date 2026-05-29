@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     // Initialisation Gemini API : Assurez-vous d'avoir déclaré GEMINI_API_KEY dans le .env
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy_key");
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
       }
