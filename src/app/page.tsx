@@ -66,90 +66,41 @@ export default function Home() {
 
         const arrayBuffer = await f.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+
+        const MAX_CHARS_PER_CHUNK = 40000;
+        let currentChunkText = "";
+        let startPage = 1;
         const newPdfParts: { label: string; text: string }[] = [];
 
-        // 1. Récupération du sommaire natif du PDF
-        const outline = await pdf.getOutline();
-        let chapters: { title: string; startPage: number }[] = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          // @ts-ignore
+          const pageText = textContent.items.map((item) => item.str || "").join(" ");
 
-        if (outline && outline.length > 0) {
-          for (const item of outline) {
-            try {
-              let dest = item.dest;
-              if (typeof dest === "string") {
-                dest = await pdf.getDestination(dest);
-              }
-              if (dest) {
-                // getPageIndex retourne un index 0-based
-                const pageIndex = await pdf.getPageIndex(dest[0]);
-                if (pageIndex >= 0) {
-                  chapters.push({ title: item.title, startPage: pageIndex + 1 });
-                }
-              }
-            } catch (e) {
-              console.warn("Impossible de résoudre la destination du chapitre:", item.title);
-            }
-          }
+          currentChunkText += pageText + "\n";
 
-          // Trier les chapitres chronologiquement et dédoublonner si plusieurs chapitres démarrent sur la même page
-          chapters = chapters.sort((a, b) => a.startPage - b.startPage);
-          chapters = chapters.filter((chap, index, arr) =>
-            index === 0 || chap.startPage > arr[index - 1].startPage
-          );
-        }
-
-        if (chapters.length > 0) {
-          // 2. Découpage basé sur les vrais chapitres
-          for (let i = 0; i < chapters.length; i++) {
-            const chapter = chapters[i];
-            const nextChapter = chapters[i + 1];
-            const startPage = chapter.startPage;
-            // La page de fin correspond au début du prochain chapitre - 1, ou la fin du document entier
-            const endPage = nextChapter ? (nextChapter.startPage - 1) : pdf.numPages;
-
-            if (startPage > endPage) continue;
-
-            let chunkText = "";
-            for (let p = startPage; p <= endPage; p++) {
-              const page = await pdf.getPage(p);
-              const textContent = await page.getTextContent();
-              // @ts-ignore
-              const pageText = textContent.items.map((item) => item.str || "").join(" ");
-              chunkText += pageText + "\n";
-            }
-
-            if (chunkText.trim().length > 0) {
-              newPdfParts.push({ label: chapter.title, text: chunkText });
-            }
-          }
-        }
-
-        // 3. Fallback : Si pdf.getOutline() est vide ou sans contenu exploitable, découpage par lots
-        if (newPdfParts.length === 0) {
-          const PAGES_PER_CHUNK = 15;
-          let currentChunkText = "";
-          let startPage = 1;
-
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            // @ts-ignore
-            const pageText = textContent.items.map((item) => item.str || "").join(" ");
-            currentChunkText += pageText + "\n";
-
-            if (i % PAGES_PER_CHUNK === 0 || i === pdf.numPages) {
-              const label = startPage === i
-                ? `Pages ${startPage}`
-                : `Pages ${startPage} à ${i}`;
-
+          if (currentChunkText.length >= MAX_CHARS_PER_CHUNK || i === pdf.numPages) {
+            // Si c'est la fin du document et qu'on a aucun chunk précédent, c'est le "Document complet"
+            if (i === pdf.numPages && newPdfParts.length === 0) {
               newPdfParts.push({
-                label: `Partie : ${label}`,
+                label: "Document complet",
                 text: currentChunkText
               });
+            } else {
+              const partNumber = newPdfParts.length + 1;
+              const label = startPage === i
+                ? `Partie ${partNumber} (Page ${startPage})`
+                : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
 
-              currentChunkText = "";
-              startPage = i + 1;
+              newPdfParts.push({
+                label,
+                text: currentChunkText
+              });
             }
+
+            currentChunkText = "";
+            startPage = i + 1;
           }
         }
 
