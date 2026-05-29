@@ -1,6 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Configuration du Worker pour pdfjs-dist compatible Next.js App Router
+if (typeof window !== "undefined") {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+}
 
 // Types
 interface QuizQuestion {
@@ -50,21 +56,41 @@ export default function Home() {
     }
   };
 
-  const generateQuiz = async () => {
+    const generateQuiz = async () => {
     if (!file) return;
     setPhase("generating");
     setError(null);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("difficulty", difficulty);
-    formData.append("questionCount", questionCount.toString());
-    formData.append("questionType", questionType);
-
     try {
+      // 1. Extraction locale du texte PDF (Contourne la limite de 4.5MB Vercel)
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+      
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        // @ts-ignore
+        const pageText = textContent.items.map((item) => item.str || "").join(" ");
+        text += pageText + "\n";
+      }
+
+      if (!text || text.trim() === "") {
+        throw new Error("Impossible d'extraire le texte de ce PDF.");
+      }
+
+      // 2. Envoi JSON propre vers l'API
       const res = await fetch("/api/generate", {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text,
+          difficulty,
+          questionCount,
+          questionType
+        }),
       });
 
       const data = await res.json();
@@ -77,7 +103,7 @@ export default function Home() {
       setError(err.message);
       setPhase("config");
     }
-  };
+    };
 
   const handleOptionToggle = (option: string) => {
     if (questionType === "radio") {

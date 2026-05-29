@@ -1,51 +1,21 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-// @ts-ignore : pdf2json n'a pas de typage officiel fourni, on ignore l'erreur de déclaration
-import PDFParser from "pdf2json";
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
-    const difficulty = formData.get("difficulty") as string;
-    const questionCount = formData.get("questionCount") as string;
-    const questionType = formData.get("questionType") as string;
-
-    if (!file) {
-      return NextResponse.json({ error: "Aucun fichier fourni." }, { status: 400 });
-    }
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    let text = "";
-    try {
-      // Nouvelle méthode sans DOM avec pdf2json (Promesse et Events)
-      text = await new Promise<string>((resolve, reject) => {
-        const pdfParser = new PDFParser(null, 1);
-
-        pdfParser.on("pdfParser_dataError", (errData: any) => {
-          reject(errData.parserError);
-        });
-
-        pdfParser.on("pdfParser_dataReady", () => {
-          resolve(pdfParser.getRawTextContent());
-        });
-
-        pdfParser.parseBuffer(buffer);
-      });
-    } catch (e) {
-      console.error("Erreur de parsing PDF:", e);
-      return NextResponse.json({ error: "Erreur lors de la lecture du PDF." }, { status: 500 });
-    }
+    const { text, difficulty, questionCount, questionType } = await req.json();
 
     if (!text || text.trim().length === 0) {
-      return NextResponse.json({ error: "Le PDF est vide ou le texte ne peut être extrait." }, { status: 400 });
+      return NextResponse.json({ error: "Le texte fourni est vide ou invalide." }, { status: 400 });
     }
 
     // Initialisation Gemini API : Assurez-vous d'avoir déclaré GEMINI_API_KEY dans le .env
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy_key");
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
     });
 
     const prompt = `
@@ -82,8 +52,7 @@ ${text.substring(0, 50000)}
 
     if (!content) throw new Error("Réponse de l'IA vide.");
 
-    const cleanedContent = content.replace(/```json/gi, "").replace(/```/gi, "").trim();
-    const json = JSON.parse(cleanedContent);
+    const json = JSON.parse(content);
 
     return NextResponse.json({
       success: true,
