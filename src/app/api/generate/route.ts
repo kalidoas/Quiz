@@ -47,7 +47,26 @@ ${text.substring(0, 50000)}
 `;
 
     // Récupération de la donnée depuis l'API Google Gemini
-    const result = await model.generateContent(prompt);
+    let result;
+    const maxRetries = 3;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        result = await model.generateContent(prompt);
+        break;
+      } catch (error: any) {
+        attempt++;
+        if (error?.status === 503 && attempt < maxRetries) {
+          console.warn(`Erreur 503, tentative ${attempt}/${maxRetries} dans 2 secondes...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (!result) throw new Error("Échec de la génération après plusieurs tentatives.");
+
     const content = result.response.text();
 
     if (!content) throw new Error("Réponse de l'IA vide.");
