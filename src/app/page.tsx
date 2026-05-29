@@ -66,8 +66,8 @@ export default function Home() {
 
         const arrayBuffer = await f.arrayBuffer();
         const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-
-        const MAX_CHARS_PER_CHUNK = 40000;
+        
+        const PAGES_PER_CHUNK = 20;
         let currentChunkText = "";
         let startPage = 1;
         const newPdfParts: { label: string; text: string }[] = [];
@@ -80,24 +80,17 @@ export default function Home() {
 
           currentChunkText += pageText + "\n";
 
-          if (currentChunkText.length >= MAX_CHARS_PER_CHUNK || i === pdf.numPages) {
-            // Si c'est la fin du document et qu'on a aucun chunk précédent, c'est le "Document complet"
-            if (i === pdf.numPages && newPdfParts.length === 0) {
-              newPdfParts.push({
-                label: "Document complet",
-                text: currentChunkText
-              });
-            } else {
-              const partNumber = newPdfParts.length + 1;
-              const label = startPage === i
-                ? `Partie ${partNumber} (Page ${startPage})`
-                : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
+          // Découpage strict toutes les 20 pages ou à la fin du document
+          if (i % PAGES_PER_CHUNK === 0 || i === pdf.numPages) {
+            const partNumber = newPdfParts.length + 1;
+            const label = startPage === i
+              ? `Partie ${partNumber} (Page ${startPage})`
+              : `Partie ${partNumber} (Pages ${startPage} à ${i})`;
 
-              newPdfParts.push({
-                label,
-                text: currentChunkText
-              });
-            }
+            newPdfParts.push({
+              label,
+              text: currentChunkText
+            });
 
             currentChunkText = "";
             startPage = i + 1;
